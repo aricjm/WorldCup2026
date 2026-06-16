@@ -337,6 +337,7 @@ export default function WorldCupPool() {
   const [showStatsPrompt, setShowStatsPrompt] = useState(false);
   const [statsData] = useState(SEED_STATS);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingStats, setIsLoadingStats] = useState(false); // New loading state for stats
   const [showUserModal, setShowUserModal] = useState(true);
   const [dataSource, setDataSource] = useState(() => localStorage.getItem(LOCAL_STORAGE_MATCHES_KEY) ? 'cache' : 'seed');
 
@@ -457,10 +458,88 @@ export default function WorldCupPool() {
   }
 
 // ── STATS: baked-in data, updated by Claude on request ──────────────────────
-  function requestStatsUpdate() {
-    const msg = "Update my World Cup stats";
-    try { window.parent.postMessage({ type: "human_turn", message: msg }, "*"); } catch (e) { }
-    try { navigator.clipboard.writeText(msg); } catch (e) { }
+  // Function to update stats based on fetched match data
+  const updateStatsFromMatches = async () => {
+    setIsLoadingStats(true);
+    
+    const TEAM_NAME_MAP = {
+      "United States": "USA",
+      "Czechia": "Czech Republic",
+      "Bosnia-Herzegovina": "Bosnia & Herzegovina",
+      "Cape Verde Islands": "Cape Verde",
+      "Congo DR": "DR Congo"
+    };
+
+    try {
+      // 1. Fetch Top Scorers
+      const scorersRes = await fetch("/fd-api/competitions/WC/scorers", {
+        headers: { "X-Auth-Token": RAPID_API_KEY }
+      });
+      const scorersData = await scorersRes.json();
+
+      // 2. Fetch Tournament Teams (to get info like Coach and Venue)
+      const teamsRes = await fetch("/fd-api/competitions/WC/teams", {
+        headers: { "X-Auth-Token": RAPID_API_KEY }
+      });
+      const teamsData = await teamsRes.json();
+
+      const allPlayedMatches = [...matches, ...knockout].filter(m => m.score1 !== undefined && m.score2 !== undefined);
+      const totalPlayed = allPlayedMatches.length;
+
+      // Update lastUpdate string
+      // Transform scorers
+      const newTopScorers = (scorersData.scorers || []).map(s => ({
+        player: s.player.name,
+        team: TEAM_NAME_MAP[s.team.name] || s.team.name,
+        goals: s.goals,
+        assists: s.assists || 0
+      }));
+
+      // Generate Dynamic Fun Facts from Team data
+      const apiFunFacts = [];
+      if (teamsData.teams && teamsData.teams.length > 0) {
+        // Fact about a random team
+        const randomTeam = teamsData.teams[Math.floor(Math.random() * teamsData.teams.length)];
+        apiFunFacts.push(`${randomTeam.name} is lead by coach ${randomTeam.coach.name} and hosts matches at ${randomTeam.venue || "various venues"}.`);
+        
+        // Fact about a user's team specifically
+        const myTeamNames = Array.from(yourTeams);
+        const myRandomTeam = teamsData.teams.find(t => myTeamNames.includes(TEAM_NAME_MAP[t.name] || t.name));
+        if (myRandomTeam) {
+          apiFunFacts.push(`Your team, ${myRandomTeam.shortName}, was founded in ${myRandomTeam.founded}. Their colors are ${myRandomTeam.clubColors}.`);
+        }
+      }
+
+      // Update statsData state
+      setStatsData(prevStats => ({
+        ...prevStats,
+        // lastUpdate: `Refreshed: ${new Date().toLocaleString()} (${totalPlayed} matches played)`
+        // Note: More complex stats like topScorers, poolLeaderStats, etc.,
+        // would require significant aggregation logic here, or additional API calls
+        // to endpoints like /players or /teams if available.
+        // For this request, we're primarily updating the timestamp.
+        lastUpdate: `Refreshed: ${new Date().toLocaleString()} (${totalPlayed} matches played)`,
+        topScorers: newTopScorers.length > 0 ? newTopScorers : prevStats.topScorers,
+        funFacts: apiFunFacts.length > 0 ? [...apiFunFacts, ...prevStats.funFacts.slice(0, 4)] : prevStats.funFacts
+      }));
+      
+      console.log("Stats updated from current match data.");
+    } catch (error) {
+      console.error("Failed to update stats from match data:", error);
+      alert("Failed to fetch detailed tournament stats. Check your API limit.");
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
+  async function requestStatsUpdate() {
+    if (RAPID_API_KEY) {
+      await updateStatsFromMatches();
+    } else {
+      const msg = "Update my World Cup stats";
+      try { window.parent.postMessage({ type: "human_turn", message: msg }, "*"); } catch (e) { }
+      try { navigator.clipboard.writeText(msg); } catch (e) { }
+    }
     setShowStatsPrompt(true);
     setTimeout(() => setShowStatsPrompt(false), 4000);
   }
@@ -1182,9 +1261,10 @@ export default function WorldCupPool() {
                 <h2 style={{ color: "#86efac", fontSize: 15, fontWeight: 700, margin: 0 }}>TOURNAMENT STATS</h2>
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>Last updated: {statsData.lastUpdate}</div>
               </div>
-              <button onClick={requestStatsUpdate} style={{ background: "#14532d", border: "1px solid #22c55e", borderRadius: 8, color: "#4ade80", padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                ⚡ Update Stats
-              </button>
+              {/* <button onClick={requestStatsUpdate} style={{ background: "#14532d", border: "1px solid #22c55e", borderRadius: 8, color: "#4ade80", padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                ⚡ Update St
+                {isLoadingStats ? <Spinner /> : "⚡"} {isLoadingStats ? "Updating..." : "Update Stats"}
+              </button> */}
             </div>
 
             {showStatsPrompt && (
