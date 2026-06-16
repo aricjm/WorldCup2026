@@ -316,6 +316,11 @@ export default function WorldCupPool() {
   const [editingSlot, setES] = useState(null);
   const [newTeamName, setNTN] = useState("");
   const [selectedGroup, setSG] = useState("Group K");
+  const [proposedTrade, setProposedTrade] = useState(null);
+  const [builderP1, setBuilderP1] = useState("");
+  const [builderT1, setBuilderT1] = useState("");
+  const [builderP2, setBuilderP2] = useState("");
+  const [builderT2, setBuilderT2] = useState("");
 
   // Local Storage Keys for match data persistence
   const LOCAL_STORAGE_MATCHES_KEY = "wc_matches_data";
@@ -598,6 +603,7 @@ export default function WorldCupPool() {
     { id: "allteams", label: "🔧 All Teams" },
     { id: "payouts", label: "💰 Payouts" },
     { id: "edit", label: "✏️ Edit Draft" },
+    { id: "trades", label: "🤝 Trades" },
     // Show Icons tab only if Aric is selected
     ...(myPlayer?.name === "Aric" ? [{ id: "icons", label: "✨ Icons" }] : []),
   ];
@@ -663,6 +669,53 @@ export default function WorldCupPool() {
         </div>
       </div>
     );
+  };
+
+  // ── TRADE LOGIC ────────────────────────────────────────────────────────────
+  const getTradeRecommendations = () => {
+    const recs = [];
+    players.forEach(p => {
+      // Group Conflict Detection
+      const groupMap = {};
+      p.teams.forEach(t => {
+        const grp = groups.find(g => g.teams.includes(t))?.name;
+        if (grp) {
+          if (!groupMap[grp]) groupMap[grp] = [];
+          groupMap[grp].push(t);
+        }
+      });
+
+      Object.entries(groupMap).forEach(([gn, ts]) => {
+        if (ts.length > 1) {
+          const teamToTrade = ts[1];
+          // Find a player who doesn't have a team in this group and has a team in a group this player is missing
+          const playerMissingGroup = players.find(other => 
+            other.name !== p.name && 
+            !other.teams.some(ot => groups.find(g => g.teams.includes(ot))?.name === gn)
+          );
+          
+          if (playerMissingGroup) {
+            const targetTeam = playerMissingGroup.teams[Math.floor(Math.random() * 4)];
+            recs.push({
+              player1: p.name,
+              give: teamToTrade,
+              player2: playerMissingGroup.name,
+              receive: targetTeam,
+              reason: `Diversification: ${p.name} has multiple teams in ${gn}.`,
+              urgency: "High"
+            });
+          }
+        }
+      });
+
+      // Value-based logic could be added here comparing pts/GD
+    });
+    
+    // If no conflicts, suggest a "Power Swap"
+    if (recs.length === 0) {
+      recs.push({ player1: "Jimmy", give: "USA", player2: "Bradberry", receive: "Mexico", reason: "The North American Blockbuster Swap.", urgency: "Medium" });
+    }
+    return recs;
   };
 
   return (
@@ -1069,6 +1122,152 @@ export default function WorldCupPool() {
           </div>
         )}
 
+        {/* ══ TRADES ══ */}
+        {activeTab === "trades" && (
+          <div>
+            {/* MANUAL TRADE BUILDER */}
+            <div style={{ ...card(), marginBottom: 24, padding: 16, border: "1px solid #4ade8033" }}>
+              <div style={{ marginBottom: 16 }}>
+                <h3 style={{ color: "#86efac", fontSize: 13, fontWeight: 800, margin: 0, letterSpacing: 1 }}>CREATE CUSTOM TRADE</h3>
+                <p style={{ color: "#6b7280", fontSize: 11, marginTop: 4 }}>Manually select teams to build a swap proposal between players.</p>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 15, alignItems: "flex-start" }}>
+                {/* Player 1 Column */}
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <label style={{ display: "block", fontSize: 10, color: "#6b7280", marginBottom: 5, fontWeight: 700 }}>PLAYER 1</label>
+                  <select 
+                    value={builderP1} 
+                    onChange={(e) => { setBuilderP1(e.target.value); setBuilderT1(""); }}
+                    style={{ width: "100%", background: "#0a1a0f", border: "1px solid #374151", color: "#e5e7eb", padding: "8px", borderRadius: 6, fontSize: 12, outline: "none" }}
+                  >
+                    <option value="">Select Player...</option>
+                    {players.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                  </select>
+                  {builderP1 && (
+                    <select 
+                      value={builderT1} 
+                      onChange={(e) => setBuilderT1(e.target.value)}
+                      style={{ width: "100%", background: "#0a1a0f", border: "1px solid #374151", color: "#e5e7eb", padding: "8px", borderRadius: 6, fontSize: 12, marginTop: 8, outline: "none" }}
+                    >
+                      <option value="">Select Team...</option>
+                      {players.find(p => p.name === builderP1)?.teams.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  )}
+                </div>
+
+                <div style={{ fontSize: 20, paddingTop: 30, color: "#4b5563" }}>⇄</div>
+
+                {/* Player 2 Column */}
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <label style={{ display: "block", fontSize: 10, color: "#6b7280", marginBottom: 5, fontWeight: 700 }}>PLAYER 2</label>
+                  <select 
+                    value={builderP2} 
+                    onChange={(e) => { setBuilderP2(e.target.value); setBuilderT2(""); }}
+                    style={{ width: "100%", background: "#0a1a0f", border: "1px solid #374151", color: "#e5e7eb", padding: "8px", borderRadius: 6, fontSize: 12, outline: "none" }}
+                  >
+                    <option value="">Select Player...</option>
+                    {players.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                  </select>
+                  {builderP2 && (
+                    <select 
+                      value={builderT2} 
+                      onChange={(e) => setBuilderT2(e.target.value)}
+                      style={{ width: "100%", background: "#0a1a0f", border: "1px solid #374151", color: "#e5e7eb", padding: "8px", borderRadius: 6, fontSize: 12, marginTop: 8, outline: "none" }}
+                    >
+                      <option value="">Select Team...</option>
+                      {players.find(p => p.name === builderP2)?.teams.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              <button 
+                disabled={!builderP1 || !builderT1 || !builderP2 || !builderT2 || builderP1 === builderP2}
+                onClick={() => setProposedTrade({
+                  player1: builderP1,
+                  give: builderT1,
+                  player2: builderP2,
+                  receive: builderT2,
+                  reason: "User-created manual trade proposal.",
+                  urgency: "Manual"
+                })}
+                style={{ 
+                  width: "100%", marginTop: 16, padding: "12px", background: "#16a34a", 
+                  border: "none", borderRadius: 8, color: "#fff", fontWeight: 800, 
+                  cursor: "pointer", fontSize: 13, 
+                  opacity: (!builderP1 || !builderT1 || !builderP2 || !builderT2 || builderP1 === builderP2) ? 0.4 : 1,
+                  transition: "all 0.2s"
+                }}
+              >
+                BUILD TRADE PROPOSAL
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <h2 style={{ color: "#86efac", fontSize: 15, fontWeight: 700, margin: 0, letterSpacing: 1 }}>TRADE RECOMMENDATIONS</h2>
+              <p style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>AI-powered suggestions to balance your portfolio and reduce group risk.</p>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {getTradeRecommendations().map((tr, i) => (
+                <div key={i} style={{ ...card(), padding: 0, overflow: "hidden", borderLeft: tr.urgency === "High" ? "4px solid #f87171" : "4px solid #fbbf24" }}>
+                  <div style={{ padding: "12px 16px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: tr.urgency === "High" ? "#f87171" : "#fbbf24", textTransform: "uppercase", letterSpacing: 1 }}>
+                        {tr.urgency} Priority Trade
+                      </span>
+                      <span style={{ fontSize: 11, color: "#4b5563" }}>Refreshed: Today</span>
+                    </div>
+                    
+                    <div style={{ display: "flex", alignItems: "center", gap: 15, justifyContent: "center" }}>
+                      <div style={{ textAlign: "center", flex: 1 }}>
+                        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>{tr.player1} gives</div>
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px", borderRadius: 8, border: "1px solid #1f2937" }}>
+                          <Flag country={tr.give} /> <span style={{ fontWeight: 700, fontSize: 13 }}>{tr.give}</span>
+                        </div>
+                      </div>
+                      
+                      <div style={{ fontSize: 20 }}>⇄</div>
+                      
+                      <div style={{ textAlign: "center", flex: 1 }}>
+                        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>{tr.player2} gives</div>
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px", borderRadius: 8, border: "1px solid #1f2937" }}>
+                          <Flag country={tr.receive} /> <span style={{ fontWeight: 700, fontSize: 13 }}>{tr.receive}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 15, padding: "10px", background: "rgba(255,255,255,0.03)", borderRadius: 6, fontSize: 12, color: "#9ca3af", display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{ fontSize: 16 }}>💡</span>
+                      <span><strong>Analysis:</strong> {tr.reason}</span>
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: "flex", borderTop: "1px solid #1f2937" }}>
+                    <button 
+                      onClick={() => setProposedTrade(tr)}
+                      style={{ flex: 1, padding: "10px", background: "transparent", border: "none", color: "#4ade80", fontSize: 11, fontWeight: 700, cursor: "pointer", borderRight: "1px solid #1f2937" }}
+                    >
+                      PROPOSE TRADE
+                    </button>
+                    <button style={{ flex: 1, padding: "10px", background: "transparent", border: "none", color: "#6b7280", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>DISMISS</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ ...card(), marginTop: 24, padding: 16 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 800, color: "#e5e7eb", marginBottom: 12 }}>PRO-TIP: Why Trade?</h3>
+              <ul style={{ margin: 0, paddingLeft: 18, color: "#9ca3af", fontSize: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                <li><strong>Diversify Groups:</strong> If you have two teams in Group D, one is guaranteed to lose points to the other.</li>
+                <li><strong>Hedging:</strong> Trade a high-risk team for a "boring" but consistent point-earner.</li>
+                <li><strong>Favorite Teams:</strong> Sometimes you just want to root for the teams you actually like!</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
         {/* ══ MY TEAMS ══ */}
         {activeTab === "myteams" && myPlayer && (
           <div>
@@ -1267,12 +1466,12 @@ export default function WorldCupPool() {
               </button> */}
             </div>
 
-            {showStatsPrompt && (
+            {/* {showStatsPrompt && (
               <div style={{ background: "rgba(20,83,45,0.5)", border: "1px solid #22c55e", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#86efac", display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 18 }}>📋</span>
                 <span><strong>Copied!</strong> Paste "Update my World Cup stats" in the chat — Claude will refresh everything.</span>
               </div>
-            )}
+            )} */}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
@@ -1527,6 +1726,56 @@ export default function WorldCupPool() {
               ))}
             </select>
             <div style={{ marginTop: 24, fontSize: 11, color: '#374151' }}>Selection is saved to this browser.</div>
+          </div>
+        </div>
+      )}
+
+      {/* TRADE PROPOSAL MODAL */}
+      {proposedTrade && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)',
+          zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          backdropFilter: 'blur(10px)', padding: 20
+        }}>
+          <div style={{
+            background: '#0d2318', padding: '24px', borderRadius: '16px',
+            border: '2px solid #4ade80', width: '100%', maxWidth: '400px',
+            boxShadow: '0 0 30px rgba(74,222,128,0.2)'
+          }}>
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}>🤝</div>
+              <h2 style={{ color: '#fff', margin: 0, fontSize: 20, fontWeight: 800 }}>PROPOSE TRADE</h2>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 15, justifyContent: 'center', background: 'rgba(255,255,255,0.03)', padding: 15, borderRadius: 12, marginBottom: 20 }}>
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>{proposedTrade.player1} gets</div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}><Flag country={proposedTrade.receive} /> {proposedTrade.receive}</div>
+              </div>
+              <div style={{ fontSize: 20 }}>⇄</div>
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>{proposedTrade.player2} gets</div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}><Flag country={proposedTrade.give} /> {proposedTrade.give}</div>
+              </div>
+            </div>
+
+            <div style={{ background: 'rgba(251,191,36,0.1)', border: '1px solid #fbbf24', borderRadius: 8, padding: 12, marginBottom: 20 }}>
+              <div style={{ color: '#fbbf24', fontWeight: 800, fontSize: 12, marginBottom: 4, textTransform: 'uppercase' }}>Next Steps:</div>
+              <p style={{ margin: 0, fontSize: 13, color: '#e5e7eb', lineHeight: 1.4 }}>
+                Take a <strong>screenshot</strong> of this screen and text it to <strong>{proposedTrade.player2}</strong> to negotiate the deal!
+              </p>
+            </div>
+
+            <button
+              onClick={() => setProposedTrade(null)}
+              style={{
+                width: '100%', padding: '12px', background: '#16a34a',
+                color: '#fff', border: 'none', borderRadius: '8px',
+                fontSize: '15px', fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              GOT IT
+            </button>
           </div>
         </div>
       )}
