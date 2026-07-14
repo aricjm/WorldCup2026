@@ -63,6 +63,12 @@ const SEED_MATCHES = [{"round":"Matchday 1","date":"2026-06-11","time":"13:00 UT
 const SEED_KNOCKOUT = []; // Added missing constant
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 // ─── PAYOUT STRUCTURE ─────────────────────────────────────────────────────────
+
+const LOCAL_STORAGE_MATCHES_KEY = "wc_matches_data";
+const LOCAL_STORAGE_KNOCKOUT_KEY = "wc_knockout_data";
+const LOCAL_STORAGE_LAST_REFRESH_KEY = "wc_last_refresh_time";
+const LOCAL_STORAGE_TEAM_PROGRESS_KEY = "wc_team_progress";
+
 const PAYOUT_STRUCTURE = {
 "Round of 32": { perTeam: 5 },
 "Round of 16": { perTeam: 10 },
@@ -307,8 +313,11 @@ function BracketColumn({ title, matches, groupStandings, knockoutResults, yourTe
 export default function WorldCupPool() {
   const [players, setPlayers] = useState(INITIAL_PLAYERS);
   const [teamProgress, setTP] = useState(() => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_TEAM_PROGRESS_KEY);
+    if (saved) return JSON.parse(saved);
+
     const obj = {};
-    [...new Set(INITIAL_PLAYERS.flatMap(p => p.teams))].forEach(t => { obj[t] = { currentRound: "Group Stage" }; });
+    [...new Set(INITIAL_PLAYERS.flatMap(p => p.teams))].forEach(t => { obj[t] = { currentRound: "Group Stage", eliminated: false }; });
     return obj;
   });
   const [activeTab, setActiveTab] = useState("leaderboard");
@@ -322,22 +331,11 @@ export default function WorldCupPool() {
   const [builderP2, setBuilderP2] = useState("");
   const [builderT2, setBuilderT2] = useState("");
 
-  // Local Storage Keys for match data persistence
-  const LOCAL_STORAGE_MATCHES_KEY = "wc_matches_data";
-  const LOCAL_STORAGE_KNOCKOUT_KEY = "wc_knockout_data";
-  const LOCAL_STORAGE_LAST_REFRESH_KEY = "wc_last_refresh_time";
-  const LOCAL_STORAGE_TEAM_PROGRESS_KEY = "wc_team_progress";
-
   // Initialize match data from localStorage or fall back to SEED_MATCHES/SEED_KNOCKOUT
   const [matches, setMatches] = useState(() => {
     const savedMatches = localStorage.getItem(LOCAL_STORAGE_MATCHES_KEY);
     return savedMatches ? JSON.parse(savedMatches) : SEED_MATCHES;
   });
-
-  // Persist team progress to local storage
-  useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_TEAM_PROGRESS_KEY, JSON.stringify(teamProgress));
-  }, [teamProgress]);
 
   const [knockout, setKnockout] = useState(() => {
     const savedKnockout = localStorage.getItem(LOCAL_STORAGE_KNOCKOUT_KEY);
@@ -350,6 +348,7 @@ export default function WorldCupPool() {
   const [statsData] = useState(SEED_STATS);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingStats, setIsLoadingStats] = useState(false); // New loading state for stats
+  const [isSaving, setIsSaving] = useState(false);
   const [showUserModal, setShowUserModal] = useState(true);
   const [dataSource, setDataSource] = useState(() => localStorage.getItem(LOCAL_STORAGE_MATCHES_KEY) ? 'cache' : 'seed');
 
@@ -451,7 +450,10 @@ export default function WorldCupPool() {
     const all = getAllTeams(players);
     setTP(prev => {
       const u = { ...prev };
-      all.forEach(t => { if (!u[t]) u[t] = { currentRound: "Group Stage" }; });
+      all.forEach(t => {
+        // Ensure new teams from draft edits get a progress entry
+        if (!u[t]) u[t] = { currentRound: "Group Stage", eliminated: false };
+      });
       return u;
     });
   }, [players]);
@@ -562,7 +564,12 @@ export default function WorldCupPool() {
   const myNet = myEarnings - BUY_IN;
   const maxPossible = 430; // 4×(5+10+15+25) + 1×60 + 1×150
   const progressPct = Math.min(100, Math.max(0, (myEarnings / (BUY_IN + maxPossible)) * 100));
-  const leaderboard = players.map(p => ({ ...p, earnings: calcEarnings(p.teams, teamProgress), net: calcEarnings(p.teams, teamProgress) - BUY_IN })).sort((a, b) => b.earnings - a.earnings);
+  const leaderboard = players.map(p => {
+    const allEliminated = p.teams.every(team => teamProgress[team]?.eliminated);
+    const earnings = calcEarnings(p.teams, teamProgress);
+    const net = earnings - BUY_IN;
+    return { ...p, earnings, net, allEliminated };
+  }).sort((a, b) => b.earnings - a.earnings);
   const myRank = leaderboard.findIndex(p => p.isYou) + 1;
   const groupStandings = buildStandings(groups, matches);
   const matchesByGroup = {};
@@ -827,12 +834,20 @@ export default function WorldCupPool() {
             <h2 style={{ color: "#86efac", fontSize: 15, fontWeight: 700, marginBottom: 14, letterSpacing: 1 }}>POOL STANDINGS</h2>
             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               {leaderboard.map((p, i) => (
-                <div key={p.name} style={{ ...card(), border: p.isYou ? "1px solid #22c55e" : undefined, background: p.isYou ? "linear-gradient(135deg,rgba(20,83,45,0.6),rgba(21,128,61,0.3))" : "rgba(17,24,19,0.8)", padding: "11px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                <div key={p.name} style={{ ...card(), border: p.isYou ? "1px solid #22c55e" : undefined, background: p.isYou ? "linear-gradient(135deg,rgba(20,83,45,0.6),rgba(21,128,61,0.3))" : "rgba(17,24,19,0.8)", padding: "11px 14px", display: "flex", alignItems: "center", gap: 10, opacity: p.allEliminated ? 0.5 : 1, transition: "opacity 0.3s" }}>
                   <div style={{ width: 30, height: 30, borderRadius: "50%", background: i === 0 ? "#d97706" : i === 1 ? "#9ca3af" : i === 2 ? "#b45309" : "#374151", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 13, flexShrink: 0 }}>
                     {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: p.isYou ? "#4ade80" : "#e5e7eb" }}>{p.name}{p.isYou && <span style={{ fontSize: 10, color: "#86efac", marginLeft: 6 }}>← YOU</span>}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: p.isYou ? "#4ade80" : "#e5e7eb" }}>{p.name}{p.isYou && <span style={{ fontSize: 10, color: "#86efac", marginLeft: 6 }}>← YOU</span>}</span>
+                      {p.allEliminated && (
+                        <span style={{
+                          background: "rgba(185,28,28,0.2)", border: "1px solid #dc2626", color: "#f87171",
+                          fontSize: 9, fontWeight: 800, padding: "2px 5px", borderRadius: 5, letterSpacing: 0.5
+                        }}>💀 ELIMINATED</span>
+                      )}
+                    </div>
                     <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1 }}>{p.teams.map((t, ti) => <span key={ti} style={{ marginRight: 5 }}><Flag country={t} /> {t}</span>)}</div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -1381,9 +1396,26 @@ export default function WorldCupPool() {
         {/* ══ ALL TEAMS ══ */}
         {activeTab === "allteams" && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <h2 style={{ color: "#86efac", fontSize: 15, fontWeight: 700, margin: 0 }}>KNOCKOUT PROGRESS TRACKER</h2>
-              <div style={{ fontSize: 11, color: "#6b7280" }}>Click a round to mark when a team was eliminated.</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+              <div>
+                <h2 style={{ color: "#86efac", fontSize: 15, fontWeight: 700, margin: 0 }}>KNOCKOUT PROGRESS TRACKER</h2>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>Click a round to mark when a team was eliminated.</div>
+              </div>
+              <button
+                onClick={() => {
+                  localStorage.setItem(LOCAL_STORAGE_TEAM_PROGRESS_KEY, JSON.stringify(teamProgress));
+                  setIsSaving(true);
+                  setTimeout(() => setIsSaving(false), 2000);
+                }}
+                disabled={isSaving}
+                style={{
+                  background: isSaving ? "#16a34a" : "#14532d",
+                  border: "1px solid #22c55e", borderRadius: 8, color: "#4ade80",
+                  padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                  display: "flex", alignItems: "center", gap: 6, transition: "all 0.2s"
+                }}>
+                {isSaving ? "✅ Saved!" : "💾 Save Progress"}
+              </button>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               {getAllTeams(players).map(team => {
