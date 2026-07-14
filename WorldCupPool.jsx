@@ -102,7 +102,7 @@ function calcEarnings(teams, tp) {
   teams.forEach(team => {
     const prog = tp[team];
     if (!prog) return;
-    ROUNDS_ORDER.forEach(r => {
+    ROUNDS_ORDER.slice(1).forEach(r => { // Exclude "Group Stage" from earnings
       if (r === "Group Stage") return;
       if (ROUNDS_ORDER.indexOf(prog.currentRound) >= ROUNDS_ORDER.indexOf(r)) total += PAYOUT_STRUCTURE[r].perTeam;
     });
@@ -326,12 +326,19 @@ export default function WorldCupPool() {
   const LOCAL_STORAGE_MATCHES_KEY = "wc_matches_data";
   const LOCAL_STORAGE_KNOCKOUT_KEY = "wc_knockout_data";
   const LOCAL_STORAGE_LAST_REFRESH_KEY = "wc_last_refresh_time";
+  const LOCAL_STORAGE_TEAM_PROGRESS_KEY = "wc_team_progress";
 
   // Initialize match data from localStorage or fall back to SEED_MATCHES/SEED_KNOCKOUT
   const [matches, setMatches] = useState(() => {
     const savedMatches = localStorage.getItem(LOCAL_STORAGE_MATCHES_KEY);
     return savedMatches ? JSON.parse(savedMatches) : SEED_MATCHES;
   });
+
+  // Persist team progress to local storage
+  useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_TEAM_PROGRESS_KEY, JSON.stringify(teamProgress));
+  }, [teamProgress]);
+
   const [knockout, setKnockout] = useState(() => {
     const savedKnockout = localStorage.getItem(LOCAL_STORAGE_KNOCKOUT_KEY);
     return savedKnockout ? JSON.parse(savedKnockout) : SEED_KNOCKOUT;
@@ -564,6 +571,48 @@ export default function WorldCupPool() {
   const yourTeams = new Set(myPlayer?.teams || []);
   const knockoutResults = buildKnockoutResults(knockout, groupStandings);
 
+  // Automatically update team progress based on knockout results
+  useEffect(() => {
+    if (!knockoutResults || Object.keys(knockoutResults).length === 0) return;
+
+    setTP(prevProgress => {
+      const newProgress = JSON.parse(JSON.stringify(prevProgress)); // Deep copy
+
+      // Helper to update progress
+      const updateTeam = (team, round, eliminated) => {
+        if (!newProgress[team]) return;
+        const currentRoundIndex = ROUNDS_ORDER.indexOf(newProgress[team].currentRound);
+        const newRoundIndex = ROUNDS_ORDER.indexOf(round);
+
+        // Only update if it's a forward progression or a new elimination status
+        if (newRoundIndex > currentRoundIndex || (eliminated && !newProgress[team].eliminated)) {
+          newProgress[team].currentRound = round;
+          newProgress[team].eliminated = eliminated;
+        }
+      };
+
+      // Iterate through all played knockout matches
+      const playedKnockout = knockout.filter(m => m.score1 !== undefined && m.score2 !== undefined);
+
+      playedKnockout.forEach(match => {
+        const winner = knockoutResults[`W${match.num}`];
+        const loser = knockoutResults[`L${match.num}`];
+        const round = match.round;
+        let nextRound = "Group Stage";
+
+        if (round === "Round of 32") nextRound = "Round of 16";
+        else if (round === "Round of 16") nextRound = "Quarter-final";
+        else if (round === "Quarter-final") nextRound = "Semi-final";
+        else if (round === "Semi-final") nextRound = "Final"; // or 3rd place
+        else if (round === "Final") nextRound = "Champion";
+
+        if (loser) updateTeam(loser, round, true);
+        if (winner && nextRound !== "Group Stage") updateTeam(winner, nextRound, false);
+      });
+
+      return newProgress;
+    });
+  }, [knockoutResults, knockout]);
   const DataSourceBadge = () => {
     const config = {
       live: { icon: "📡", label: "LIVE", color: "#4ade80" },
@@ -1272,7 +1321,7 @@ export default function WorldCupPool() {
         {activeTab === "myteams" && myPlayer && (
           <div>
             <h2 style={{ color: "#86efac", fontSize: 15, fontWeight: 700, marginBottom: 14 }}>YOUR ROSTER</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 10, marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 10, marginBottom: 16 }}>
               {myPlayer.teams.map((team, i) => {
                 const prog = teamProgress[team] || { currentRound: "Group Stage" };
                 const earned = ROUNDS_ORDER.filter(r => r !== "Group Stage").reduce((a, r) => ROUNDS_ORDER.indexOf(prog.currentRound) >= ROUNDS_ORDER.indexOf(r) ? a + PAYOUT_STRUCTURE[r].perTeam : a, 0);
@@ -1297,7 +1346,10 @@ export default function WorldCupPool() {
                         </span>}
                       </div>
                     )}
-                    <div style={{ display: "inline-block", marginTop: 7, padding: "2px 7px", background: getRoundColor(prog.currentRound), borderRadius: 99, fontSize: 10, fontWeight: 700, color: "#fff" }}>{prog.currentRound}</div>
+                    <div style={{ display: "inline-block", marginTop: 7, padding: "2px 7px", background: getRoundColor(prog.currentRound), borderRadius: 99, fontSize: 10, fontWeight: 700, color: prog.eliminated ? "#fecaca" : "#fff", textDecoration: prog.eliminated ? "line-through" : "none" }}>
+                      {prog.eliminated ? `Out: ${prog.currentRound}` : prog.currentRound}
+                    </div>
+
                     <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>Earned:</div>
                     <div style={{ fontSize: 20, fontWeight: 900, color: earned > 0 ? "#4ade80" : "#6b7280" }}>${earned}</div>
                   </div>
@@ -1308,7 +1360,7 @@ export default function WorldCupPool() {
               <div style={{ padding: "9px 14px", background: "rgba(0,0,0,0.3)", fontWeight: 700, color: "#86efac", fontSize: 12 }}>PAYOUT BREAKDOWN</div>
               {ROUNDS_ORDER.filter(r => r !== "Group Stage").map(r => {
                 const pay = PAYOUT_STRUCTURE[r];
-                const q = myPlayer.teams.filter(t => ROUNDS_ORDER.indexOf((teamProgress[t] || { currentRound: "Group Stage" }).currentRound) >= ROUNDS_ORDER.indexOf(r));
+                const q = myPlayer.teams.filter(t => ROUNDS_ORDER.indexOf((teamProgress[t] || { currentRound: "Group Stage", eliminated: false }).currentRound) >= ROUNDS_ORDER.indexOf(r));
                 const earned = q.length * pay.perTeam;
                 return (
                   <div key={r} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 14px", borderBottom: "1px solid #111" }}>
@@ -1331,7 +1383,7 @@ export default function WorldCupPool() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <h2 style={{ color: "#86efac", fontSize: 15, fontWeight: 700, margin: 0 }}>KNOCKOUT PROGRESS TRACKER</h2>
-              <div style={{ fontSize: 11, color: "#6b7280" }}>Click a round to update</div>
+              <div style={{ fontSize: 11, color: "#6b7280" }}>Click a round to mark when a team was eliminated.</div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               {getAllTeams(players).map(team => {
@@ -1345,13 +1397,15 @@ export default function WorldCupPool() {
                       <span style={{ fontSize: 11, color: "#6b7280" }}>— {owners.map((o, i) => <span key={i}>{o.isYou ? <strong style={{ color: "#4ade80" }}>You</strong> : o.name}{i < owners.length - 1 ? ", " : ""}</span>)}</span>
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                      <button onClick={() => setTP(prev => ({ ...prev, [team]: { ...prev[team], eliminated: false } }))} style={{ padding: "3px 9px", borderRadius: 99, fontSize: 10, fontWeight: 700, cursor: "pointer", border: "1px solid", background: !prog.eliminated ? "#16a34a" : "transparent", borderColor: !prog.eliminated ? "#16a34a" : "#374151", color: !prog.eliminated ? "#fff" : "#6b7280" }}>
+                        ✅ Still In
+                      </button>
                       {ROUNDS_ORDER.map(r => {
-                        const isActive = prog.currentRound === r;
-                        const isPast = ROUNDS_ORDER.indexOf(r) < ROUNDS_ORDER.indexOf(prog.currentRound);
+                        const isActiveAndEliminated = prog.eliminated && prog.currentRound === r;
+                        const isPast = !prog.eliminated && ROUNDS_ORDER.indexOf(r) < ROUNDS_ORDER.indexOf(prog.currentRound);
+                        const isActiveAndIn = !prog.eliminated && prog.currentRound === r;
                         return (
-                          <button key={r} onClick={() => setTP(prev => ({ ...prev, [team]: { currentRound: r } }))} style={{ padding: "3px 9px", borderRadius: 99, fontSize: 10, fontWeight: 700, cursor: "pointer", border: "1px solid", background: isActive ? getRoundColor(r) : isPast ? "rgba(74,222,128,0.08)" : "transparent", borderColor: isActive ? getRoundColor(r) : isPast ? "#22c55e44" : "#374151", color: isActive ? "#fff" : isPast ? "#4ade80" : "#6b7280" }}>
-                            {r === "Group Stage" ? "⚽ Group" : r === "Champion" ? "🏆 Champ" : r}
-                          </button>
+                          <button key={r} onClick={() => setTP(prev => ({ ...prev, [team]: { currentRound: r, eliminated: true } }))} style={{ padding: "3px 9px", borderRadius: 99, fontSize: 10, fontWeight: 700, cursor: "pointer", border: "1px solid", background: isActiveAndEliminated ? "#dc2626" : isActiveAndIn ? getRoundColor(r) : isPast ? "rgba(74,222,128,0.08)" : "transparent", borderColor: isActiveAndEliminated ? "#dc2626" : isActiveAndIn ? getRoundColor(r) : isPast ? "#22c55e44" : "#374151", color: isActiveAndEliminated || isActiveAndIn ? "#fff" : isPast ? "#4ade80" : "#6b7280", textDecoration: isActiveAndEliminated ? "line-through" : "none" }}>{r === "Group Stage" ? "⚽ Group" : r === "Champion" ? "🏆 Champ" : r}</button>
                         );
                       })}
                     </div>
